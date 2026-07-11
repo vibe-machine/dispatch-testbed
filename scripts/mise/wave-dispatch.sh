@@ -31,6 +31,7 @@ bd -C "$ROOT" update "$BEAD_ID" --claim
 mkdir -p "$ROOT/.lanes"
 git -C "$ROOT" branch -D "$branch" >/dev/null 2>&1 || true
 git -C "$ROOT" worktree add -q -b "$branch" "$lane" main
+mise trust "$lane/mise.toml" >/dev/null
 
 echo "phase=implementing lane=$lane"
 cp "$ROOT/fixtures/seed-add-clamp/Sources/DispatchTestbed/Arithmetic.swift" "$lane/Sources/DispatchTestbed/Arithmetic.swift"

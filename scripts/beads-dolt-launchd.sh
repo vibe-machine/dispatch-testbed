@@ -54,9 +54,32 @@ CUSTOM_TYPES="wave,decision"
 
 log() { printf '  %s\n' "$*"; }
 
+set_dolt_mode() {
+  local mode="$1"
+  /usr/bin/python3 - "$REPO_ROOT/.beads/metadata.json" "$mode" <<'PY'
+import json, sys
+path, mode = sys.argv[1:]
+data = json.load(open(path))
+data["dolt_mode"] = mode
+data["dolt_database"] = "dtb"
+json.dump(data, open(path, "w"), indent=2)
+PY
+}
+
+stop_data_dir_servers() {
+  local pid cwd
+  for pid in $(pgrep -f 'dolt sql-server' 2>/dev/null || true); do
+    cwd="$(lsof -a -d cwd -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p')"
+    if [ "$cwd" = "$DATA_DIR" ]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
 stop_server() {
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
   sleep 1
+  stop_data_dir_servers
   pkill -f "dolt sql-server.*--port $PORT" 2>/dev/null || true
   pkill -f "dolt sql-server.*-P $PORT" 2>/dev/null || true
   sleep 1
@@ -107,6 +130,7 @@ PLIST_EOF
 start_server() {
   printf '%s' "$PORT" > "$REPO_ROOT/.beads/dolt-server.port"
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+  stop_data_dir_servers
   pkill -f "dolt sql-server.*--port $PORT" 2>/dev/null || true
   pkill -f "dolt sql-server.*-P $PORT" 2>/dev/null || true
   sleep 1
@@ -123,6 +147,7 @@ populate_fresh() {
   log "dtb not populated — running embedded-init -> import -> migrate"
   stop_server
   rm -rf "$REPO_ROOT/.beads/dolt" "$REPO_ROOT/.beads/embeddeddolt"
+  set_dolt_mode embedded
   # 1) init schema in embedded mode (the path that works on current bd)
   (
     cd "$REPO_ROOT"
@@ -142,12 +167,6 @@ populate_fresh() {
     mv "$REPO_ROOT/.beads/embeddeddolt/dtb" "$DATA_DIR/dtb"
   fi
   rm -rf "$REPO_ROOT/.beads/embeddeddolt"
-  # 4) pin server mode in metadata
-  /usr/bin/python3 - "$REPO_ROOT/.beads/metadata.json" <<'PY'
-import json,sys
-p=sys.argv[1]; d=json.load(open(p)); d["dolt_mode"]="server"
-json.dump(d,open(p,"w"),indent=2)
-PY
 }
 
 echo "beads dolt launchd installer  (port $PORT, data-dir $DATA_DIR)"
@@ -166,10 +185,11 @@ else
   start_server
 fi
 
-# Current bd stores the issue prefix in database configuration. Reassert it
-# after migrating the embedded repository into server layout, then restore the
-# tracked seed if this is an empty first-time database.
-"$BD" -C "$REPO_ROOT" init --prefix dtb --reinit-local --non-interactive >/dev/null 2>&1 || true
+# launchd owns the durable server after any embedded bootstrap work.
+set_dolt_mode server
+"$DOLT" --host 127.0.0.1 --port "$PORT" --no-tls sql -q \
+  "use dtb; insert into config (\`key\`, value) values ('issue_prefix', 'dtb') on duplicate key update value = 'dtb';" \
+  >/dev/null
 if ! "$BD" -C "$REPO_ROOT" show dtb-1 >/dev/null 2>&1; then
   BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" -C "$REPO_ROOT" import -i "$REPO_ROOT/.beads/issues.jsonl"
 fi

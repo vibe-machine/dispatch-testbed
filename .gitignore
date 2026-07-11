@@ -1,0 +1,7 @@
+.build/
+.lanes/
+.envrc
+.beads/dolt/
+.beads/embeddeddolt/
+.beads/dolt-server.port
+.beads/backups/

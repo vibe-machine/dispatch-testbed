@@ -1,0 +1,13 @@
+min_version = "2026.5.0"
+
+[tasks.build]
+run = "scripts/mise/build.sh"
+
+[tasks.test]
+run = "scripts/mise/test.sh"
+
+[tasks.setup]
+run = "scripts/mise/setup.sh"
+
+[tasks."wave:dispatch"]
+run = "scripts/mise/wave-dispatch.sh"

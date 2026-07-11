@@ -11,7 +11,7 @@ mise trust
 mise run setup
 ```
 
-Setup installs a project-specific launchd Dolt server on port 3308, imports the seeded `dtb-1` bead using the embedded-init workaround required by bd 1.0.5, and runs the package tests. The server is independent from OneWorkspace’s port 3307 server.
+Setup installs a project-specific launchd Dolt server on port 3317, imports the seeded `dtb-1` bead using the embedded-init workaround required by bd 1.0.5, and runs the package tests. The server is independent from OneWorkspace’s port 3307 server.
 
 ## Test tiers
 

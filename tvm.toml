@@ -5,5 +5,5 @@ path = "tvm-lanes/clones"
 branch = "agent-runtime"
 
 [beads]
-dolt_port = 3308
-remotesapi_port = 8081
+dolt_port = 3317
+remotesapi_port = 8091

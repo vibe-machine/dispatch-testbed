@@ -29,8 +29,8 @@ set -uo pipefail
 # Env overrides:
 #   BEADS_DOLT_PORT (default 3307), BEADS_DOLT_REMOTESAPI_PORT (default 8080)
 
-PORT="${BEADS_DOLT_PORT:-3308}"
-REMOTESAPI_PORT="${BEADS_DOLT_REMOTESAPI_PORT:-8081}"
+PORT="${BEADS_DOLT_PORT:-3317}"
+REMOTESAPI_PORT="${BEADS_DOLT_REMOTESAPI_PORT:-8091}"
 REINSTALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -58,6 +58,7 @@ stop_server() {
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
   sleep 1
   pkill -f "dolt sql-server.*--port $PORT" 2>/dev/null || true
+  pkill -f "dolt sql-server.*-P $PORT" 2>/dev/null || true
   sleep 1
 }
 
@@ -106,6 +107,8 @@ PLIST_EOF
 start_server() {
   printf '%s' "$PORT" > "$REPO_ROOT/.beads/dolt-server.port"
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+  pkill -f "dolt sql-server.*--port $PORT" 2>/dev/null || true
+  pkill -f "dolt sql-server.*-P $PORT" 2>/dev/null || true
   sleep 1
   launchctl bootstrap "gui/$UID" "$PLIST"
   sleep 3
@@ -113,23 +116,30 @@ start_server() {
 
 db_has_data() {
   # beads_one exists as a subdir repo AND bd can query it
-  [ -d "$DATA_DIR/beads_one/.dolt" ] && "$BD" -C "$REPO_ROOT" stats >/dev/null 2>&1
+  [ -d "$DATA_DIR/dtb/.dolt" ] && "$BD" -C "$REPO_ROOT" stats >/dev/null 2>&1
 }
 
 populate_fresh() {
-  log "beads_one not populated — running embedded-init -> import -> migrate"
+  log "dtb not populated — running embedded-init -> import -> migrate"
   stop_server
   rm -rf "$REPO_ROOT/.beads/dolt" "$REPO_ROOT/.beads/embeddeddolt"
   # 1) init schema in embedded mode (the path that works on current bd)
-  BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" -C "$REPO_ROOT" init --reinit-local --prefix dtb --non-interactive >/dev/null 2>&1 || true
+  (
+    cd "$REPO_ROOT"
+    BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" init --reinit-local --prefix dtb --non-interactive >/dev/null
+  )
   # 2) import the git-tracked JSONL
   BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" -C "$REPO_ROOT" import -i "$REPO_ROOT/.beads/issues.jsonl"
   "$BD" -C "$REPO_ROOT" dolt commit >/dev/null 2>&1 || true
   # 3) migrate the embedded repo into the server layout
   stop_server
   mkdir -p "$DATA_DIR"
-  if [ -d "$REPO_ROOT/.beads/embeddeddolt/beads_one" ]; then
-    mv "$REPO_ROOT/.beads/embeddeddolt/beads_one" "$DATA_DIR/beads_one"
+  if [ -d "$REPO_ROOT/.beads/dolt/.dolt" ]; then
+    mv "$REPO_ROOT/.beads/dolt" "$REPO_ROOT/.beads/dolt-embedded"
+    mkdir -p "$DATA_DIR"
+    mv "$REPO_ROOT/.beads/dolt-embedded" "$DATA_DIR/dtb"
+  elif [ -d "$REPO_ROOT/.beads/embeddeddolt/dtb" ]; then
+    mv "$REPO_ROOT/.beads/embeddeddolt/dtb" "$DATA_DIR/dtb"
   fi
   rm -rf "$REPO_ROOT/.beads/embeddeddolt"
   # 4) pin server mode in metadata
@@ -156,12 +166,20 @@ else
   start_server
 fi
 
+# Current bd stores the issue prefix in database configuration. Reassert it
+# after migrating the embedded repository into server layout, then restore the
+# tracked seed if this is an empty first-time database.
+"$BD" -C "$REPO_ROOT" init --prefix dtb --reinit-local --non-interactive >/dev/null 2>&1 || true
+if ! "$BD" -C "$REPO_ROOT" show dtb-1 >/dev/null 2>&1; then
+  BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" -C "$REPO_ROOT" import -i "$REPO_ROOT/.beads/issues.jsonl"
+fi
+
 # Register custom types in the DB so writes don't need the env var.
 "$BD" -C "$REPO_ROOT" config set types.custom "$CUSTOM_TYPES" >/dev/null 2>&1 || true
 
 echo
 if db_has_data; then
-  log "✓ server up on $PORT; beads_one reachable"
+  log "✓ server up on $PORT; dtb reachable"
   "$BD" -C "$REPO_ROOT" stats 2>/dev/null | grep -iE "Total Issues" || true
   log "note: 'bd dolt status' will say 'not running' (launchd owns the process);"
   log "      'bd dolt show' is the real check and should say 'Server connection OK'."

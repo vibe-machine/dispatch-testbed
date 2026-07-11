@@ -148,15 +148,20 @@ populate_fresh() {
   stop_server
   rm -rf "$REPO_ROOT/.beads/dolt" "$REPO_ROOT/.beads/embeddeddolt"
   set_dolt_mode embedded
-  # 1) init schema in embedded mode (the path that works on current bd)
-  (
-    cd "$REPO_ROOT"
-    BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" init --reinit-local --prefix dtb --non-interactive >/dev/null
-  )
-  # 2) import the git-tracked JSONL
-  BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" -C "$REPO_ROOT" import -i "$REPO_ROOT/.beads/issues.jsonl"
-  "$BD" -C "$REPO_ROOT" dolt commit >/dev/null 2>&1 || true
-  # 3) migrate the embedded repo into the server layout
+  if git -C "$REPO_ROOT" ls-remote --exit-code origin refs/dolt/data >/dev/null 2>&1; then
+    # Existing repository: preserve the shared Dolt lineage.
+    "$BD" -C "$REPO_ROOT" bootstrap
+  else
+    # First publication: initialize in embedded mode because current bd cannot
+    # initialize a brand-new database through sql-server.
+    (
+      cd "$REPO_ROOT"
+      BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" init --reinit-local --prefix dtb --non-interactive >/dev/null
+    )
+    BD_TYPES_CUSTOM="$CUSTOM_TYPES" "$BD" -C "$REPO_ROOT" import -i "$REPO_ROOT/.beads/issues.jsonl"
+    "$BD" -C "$REPO_ROOT" dolt commit >/dev/null 2>&1 || true
+  fi
+  # Migrate the embedded repo into the server layout.
   stop_server
   mkdir -p "$DATA_DIR"
   if [ -d "$REPO_ROOT/.beads/dolt/.dolt" ]; then
